@@ -402,6 +402,52 @@ document.getElementById('restart-btn').addEventListener('click', () => {
     }
 });
 
+function calculateFinalScore() {
+    if (!myPlayerInfo || !roomState) return;
+    const traces = roomState.traces || {};
+    const myTraces = traces[myPlayerInfo.number] || [];
+    
+    // モデルパスを game.js の関数から取得する
+    let mPath = [];
+    if (typeof getModelPath === 'function') {
+        mPath = getModelPath();
+    }
+    
+    if (!mPath || mPath.length === 0 || myTraces.length === 0) {
+        sendGameScore(0);
+        return;
+    }
+    
+    let errSum = 0;
+    let count = 0;
+    
+    myTraces.forEach(pt => {
+        let minDist = 999999;
+        mPath.forEach(mp => {
+            const dx = pt.x - mp.x;
+            const dy = pt.y - mp.y;
+            const d = Math.sqrt(dx*dx + dy*dy);
+            if (d < minDist) minDist = d;
+        });
+        errSum += minDist;
+        count++;
+    });
+    
+    const avgErr = count > 0 ? errSum / count : 999999;
+    
+    // 許容誤差（tolerance）: 20px。ゼロ誤差で100点、20px誤差で0点
+    const tolerance = window.gameConfig?.tolerance || 20;
+    
+    // 線形スコア: avgErr=0→100点, avgErr>=tolerance→0点
+    let displayScore = Math.round(Math.max(0, (1 - avgErr / tolerance)) * 100);
+    
+    // 上限100点を厳守（念のため）
+    if (displayScore > 100) displayScore = 100;
+    if (displayScore < 0) displayScore = 0;
+    
+    sendGameScore(displayScore);
+}
+
 // ====== Interception points for game.js ======
 window.sendGameDraw = function(x, y) {
     if(!myPlayerInfo || !roomRef) return;

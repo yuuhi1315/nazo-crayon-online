@@ -6,7 +6,7 @@ window.gameConfig = {
     review_scroll_speed: 600,
     line_width: 40,
     margin_y: 0.15,
-    tolerance: 50,
+    tolerance: 20,
     player_speed: 150,
     max_internal_score: 105
 };

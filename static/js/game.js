@@ -80,6 +80,10 @@ function updateRoomState(newState) {
     }
 }
 
+function getModelPath() {
+    return modelPath ? [...modelPath] : [];
+}
+
 function startGameplay() {
     isGameRunning = true;
     localStartTime = Date.now();
