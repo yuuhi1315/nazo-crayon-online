@@ -1,0 +1,198 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+
+:root {
+    --bg-color: #0f172a; /* Slate 900 */
+    --text-primary: #f8fafc;
+    --text-secondary: #94a3b8;
+    --accent: #3b82f6; /* Blue 500 */
+    --accent-hover: #2563eb;
+    --lane-bg: rgba(255, 255, 255, 0.05);
+    --lane-border: rgba(255, 255, 255, 0.1);
+    
+    --color-1p: #ef4444; /* Red */
+    --color-2p: #3b82f6; /* Blue */
+    --color-3p: #10b981; /* Green */
+    --color-4p: #f59e0b; /* Yellow */
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: 'Inter', sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-primary);
+    overflow: hidden; /* Fullscreen game with no scrollbar */
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+
+/* ロビー・準備待機画面のアニメーションとGlassmorphism */
+#lobby {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(30, 41, 59, 0.6);
+    backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 3rem;
+    border-radius: 1.5rem;
+    text-align: center;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+    z-index: 10;
+    min-width: 320px;
+}
+
+h1 { 
+    font-weight: 800; 
+    font-size: 2.5rem; 
+    margin-bottom: 0.5rem; 
+    background: linear-gradient(to right, #60a5fa, #c084fc); 
+    -webkit-background-clip: text; 
+    background-clip: text;
+    color: transparent;  
+}
+
+#room-info {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-bottom: 1.5rem;
+}
+
+#players-list {
+    display: flex; flex-direction: column; gap: 0.8rem; margin: 1.5rem 0;
+    font-size: 1.2rem; font-weight: 600;
+}
+
+#ready-btn {
+    background: var(--accent); color: white; border: none; padding: 0.75rem 2.5rem;
+    font-size: 1.1rem; font-weight: 600; border-radius: 0.5rem; cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+#ready-btn:hover:not(:disabled) { 
+    background: var(--accent-hover); transform: scale(1.05); 
+}
+#ready-btn:disabled {
+    background: #475569;
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+#game-container {
+    display: none;
+    flex: 1;
+    flex-direction: column;
+    width: 100vw;
+    height: 100vh;
+}
+
+/* 各プレイヤーが操作・閲覧するレーン */
+.lane-wrapper {
+    flex: 1;
+    position: relative;
+    border-bottom: 2px solid var(--lane-border);
+    display: flex;
+    align-items: center;
+    background: var(--lane-bg);
+}
+
+.lane-wrapper:last-child {
+    border-bottom: none;
+}
+
+.player-info {
+    position: absolute;
+    left: 20px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 2;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.1);
+    padding: 0.5rem 1.5rem;
+    border-radius: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+    pointer-events: none; /* UIのクリックを遮らないように */
+}
+
+.player-info h2 { font-size: 1.5rem; display: flex; align-items: center; gap: 8px; }
+.player-score { font-size: 2.2rem; font-weight: 800; font-family: monospace; }
+.score-label { font-size: 0.8rem; color: var(--text-secondary); }
+
+/* 1P~4Pのカラーリング */
+.p1-indicator { color: var(--color-1p); }
+.p2-indicator { color: var(--color-2p); }
+.p3-indicator { color: var(--color-3p); }
+.p4-indicator { color: var(--color-4p); }
+
+canvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+}
+
+/* ゲーム進行中の中央メッセージ演出 (3,2,1,START/FINISH等) */
+#overlay-message {
+    display: none;
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 15;
+    pointer-events: none;
+}
+#overlay-text {
+    font-size: 8rem;
+    font-weight: 800;
+    color: #fca5a5;
+    text-shadow: 0 0 20px rgba(239, 68, 68, 0.8), 0 0 40px rgba(239, 68, 68, 0.5);
+    animation: pop 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+@keyframes pop {
+    0% { transform: scale(0.5); opacity: 0; }
+    80% { transform: scale(1.1); opacity: 1; }
+    100% { transform: scale(1); opacity: 1; }
+}
+
+/* ゲーム終了後の結果ダイアログ */
+#overlay-result {
+    display: none;
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.85);
+    backdrop-filter: blur(5px);
+    z-index: 20;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+}
+
+.result-card {
+    background: rgba(30, 41, 59, 0.95);
+    padding: 3rem;
+    border-radius: 1.5rem;
+    text-align: center;
+    border: 1px solid rgba(255,255,255,0.2);
+    box-shadow: 0 20px 40px rgba(0,0,0,0.8);
+    min-width: 400px;
+}
+
+.result-card h2 { font-size: 3rem; margin-bottom: 2rem; color: #fbbf24; }
+.rank-list { font-size: 1.5rem; text-align: left; }
+.rank-item { 
+    margin: 1rem 0; 
+    display: flex; 
+    justify-content: space-between; 
+    border-bottom: 1px solid rgba(255,255,255,0.1); 
+    padding-bottom: 0.5rem;
+    font-weight: 600;
+}
+#restart-btn {
+    margin-top: 2rem;
+    background: var(--text-primary); color: var(--bg-color); border: none; padding: 0.8rem 2rem;
+    font-size: 1.2rem; font-weight: 800; border-radius: 0.5rem; cursor: pointer;
+    transition: all 0.2s;
+}
+#restart-btn:hover { background: #cbd5e1; transform: translateY(-2px); }

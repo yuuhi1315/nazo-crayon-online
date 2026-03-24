@@ -1,0 +1,14 @@
+{
+  "name": "nazo-crayon-online",
+  "version": "1.0.0",
+  "description": "Multiplayer drawing game Nazo-Crayon ONLINE",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "socket.io": "^4.7.5"
+  }
+}

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>なぞクレONLINE</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div id="lobby">
+        <h1>なぞクレONLINE</h1>
+        <p id="room-info">ルームに参加中...</p>
+        <div id="players-list"></div>
+        <button id="ready-btn" disabled>準備OK</button>
+        <button id="start-btn" style="display:none; margin-top:1rem; background:var(--color-3p); color:white; border:none; padding:0.75rem 2.5rem; font-size:1.1rem; font-weight:600; border-radius:0.5rem; cursor:pointer;">ゲーム開始</button>
+    </div>
+
+    <div id="game-container">
+        <!-- 各プレイヤーの表示レーン -->
+        <div class="lane-wrapper" id="lane-1"><canvas id="canvas-1"></canvas><div class="player-info"><h2 class="p1-indicator">1P</h2></div></div>
+        <div class="lane-wrapper" id="lane-2"><canvas id="canvas-2"></canvas><div class="player-info"><h2 class="p2-indicator">2P</h2></div></div>
+        <div class="lane-wrapper" id="lane-3"><canvas id="canvas-3"></canvas><div class="player-info"><h2 class="p3-indicator">3P</h2></div></div>
+        <div class="lane-wrapper" id="lane-4"><canvas id="canvas-4"></canvas><div class="player-info"><h2 class="p4-indicator">4P</h2></div></div>
+    </div>
+
+    <!-- カウントダウンや状態遷移のアナウンス用 -->
+    <div id="overlay-message">
+        <div id="overlay-text">3</div>
+    </div>
+
+    <div id="overlay-result">
+        <div class="result-card">
+            <h2>Game Finish!</h2>
+            <div class="rank-list" id="rank-list"></div>
+            <button id="restart-btn" onclick="location.reload()">退出する / もう一度</button>
+        </div>
+    </div>
+
+    <!-- 描画とアプリロジックの分離 -->
+    <script src="/static/js/game.js?v=6"></script>
+    <script src="/static/js/main.js?v=6"></script>
+</body>
+</html>
