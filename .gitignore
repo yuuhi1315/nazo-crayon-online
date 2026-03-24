@@ -21,3 +21,6 @@ firebase.exe
 
 # Firebase cache
 .firebase/
+
+# Firebase config (contains API keys - do not commit)
+static/js/firebase_config.js
