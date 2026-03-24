@@ -4,15 +4,23 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>なぞクレONLINE</title>
-    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/css/style.css?v=38">
+    
+    <!-- Firebase SDK (v9 compat) -->
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+    
+    <!-- 定数とFirebase接続初期化 -->
+    <script src="/js/game_config.js?v=38"></script>
+    <script src="/js/firebase_config.js?v=38"></script>
 </head>
 <body>
     <div id="lobby">
         <h1>なぞクレONLINE</h1>
         <p id="room-info">ルームに参加中...</p>
         <div id="players-list"></div>
-        <button id="ready-btn" disabled>準備OK</button>
-        <button id="start-btn" style="display:none; margin-top:1rem; background:var(--color-3p); color:white; border:none; padding:0.75rem 2.5rem; font-size:1.1rem; font-weight:600; border-radius:0.5rem; cursor:pointer;">ゲーム開始</button>
+        <button id="ready-btn">準備OK</button>
+        <button id="start-btn" style="display:none; margin-top:1rem; background:var(--color-1p); color:white; border:none; padding:0.75rem 2.5rem; font-size:1.1rem; font-weight:600; border-radius:0.5rem; cursor:pointer;">ゲーム開始！</button>
     </div>
 
     <div id="game-container">
@@ -32,12 +40,12 @@
         <div class="result-card">
             <h2>Game Finish!</h2>
             <div class="rank-list" id="rank-list"></div>
-            <button id="restart-btn" onclick="location.reload()">退出する / もう一度</button>
+            <button id="restart-btn" style="margin-top:20px; font-size:1.1rem;">退出する / もう一度</button>
         </div>
     </div>
 
     <!-- 描画とアプリロジックの分離 -->
-    <script src="/static/js/game.js?v=6"></script>
-    <script src="/static/js/main.js?v=6"></script>
+    <script src="/js/game.js?v=38"></script>
+    <script src="/js/main.js?v=38"></script>
 </body>
 </html>

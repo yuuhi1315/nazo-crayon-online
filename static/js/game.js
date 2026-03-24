@@ -2,9 +2,9 @@ let isGameRunning = false;
 let localStartTime = 0;
 let logicWidth = 1600; 
 let logicHeight = 400; 
-let segmentLen = 200;  
+let segmentLen = 200;  // game_config.jsのsegment_lengthに合わせた既定値
 let wsRef = null;
-let pConfig = null;
+let pConfig = window.gameConfig || { segment_length: 200, num_segments: 12, scroll_speed: 100, review_scroll_speed: 600, tolerance: 50, player_speed: 150, max_internal_score: 105 };
 let pRoom = null;
 let pMe = null; 
 
@@ -20,6 +20,7 @@ let myPy = 0;
 let prevTime = 0;
 let myHasGoal = false;
 let finalScrollOffset = null;
+let reviewStartTime = 0;
 
 window.addEventListener('keydown', e => {
     const k = e.key.toLowerCase();
@@ -33,9 +34,10 @@ window.addEventListener('keyup', e => {
 function initGame(websocket, roomState, config, myInfo) {
     wsRef = websocket;
     pRoom = roomState;
-    pConfig = config;
+    pConfig = Object.assign({}, window.gameConfig || {}, config || {});
     pMe = myInfo;
     myHasGoal = false;
+    segmentLen = pConfig.segment_length || 200;
     
     for(let i=1; i<=4; i++) {
         const canvas = document.getElementById(`canvas-${i}`);
@@ -44,7 +46,7 @@ function initGame(websocket, roomState, config, myInfo) {
             canvas.height = window.innerHeight / 4;
         }
     }
-    logicHeight = window.innerHeight / 4; 
+    // logicHeightは400固定とし、スケーリングで行うためここでの上書きを削除
     buildModelPath();
 
     myPx = 0;
@@ -53,6 +55,7 @@ function initGame(websocket, roomState, config, myInfo) {
     allTraces = {1: [], 2: [], 3: [], 4: []};
     isGameRunning = false;
     finalScrollOffset = null;
+    reviewStartTime = 0;
     
     if (!prevTime) {
         prevTime = performance.now();
@@ -63,11 +66,16 @@ function initGame(websocket, roomState, config, myInfo) {
 // main.js から参照するための更新ブリッジ
 function updateRoomState(newState) {
     pRoom = newState;
+    if (!pConfig || !pConfig.num_segments) pConfig = window.gameConfig || {};
     if (pRoom && (pRoom.state === 'scoring' || pRoom.state === 'result')) {
         if (finalScrollOffset === null) {
-            finalScrollOffset = getLogicalScrollOffset();
+            const goalX = (pConfig.num_segments || 12) * segmentLen;
+            finalScrollOffset = goalX - 150;
         }
-    } else {
+    }
+    // reviewやfinish_display中はfinalScrollOffsetをリセットしない
+    // lobbyやcountdownの時だけリセットする
+    if (pRoom && (pRoom.state === 'lobby' || pRoom.state === 'countdown')) {
         finalScrollOffset = null;
     }
 }
@@ -83,21 +91,44 @@ function stopGameplay() {
     keys.w = keys.a = keys.s = keys.d = false; 
 }
 
+function reviewGame() {
+    isGameRunning = false;
+    keys.w = keys.a = keys.s = keys.d = false;
+    reviewStartTime = Date.now();
+    finalScrollOffset = null; // review中はgetLogicalScrollOffsetのreviewブランチを使う
+}
+
 function getLogicalScrollOffset() {
-    if (!pRoom || pRoom.state === 'countdown' || pRoom.state === 'lobby') return 0;
+    const wallStartOffset = -250; // スタート時、プレイヤーよりも後方に境界壁を置く
+
+    if (!pRoom || pRoom.state === 'countdown' || pRoom.state === 'lobby') return wallStartOffset;
+    
+    if (pRoom.state === 'review') {
+        if (reviewStartTime === 0) return wallStartOffset;
+        const reviewElapsed = (Date.now() - reviewStartTime) / 1000;
+        const speed = pConfig.review_scroll_speed || 375;
+        const offset = wallStartOffset + (reviewElapsed * speed);
+        
+        // ゴールラインが画面横左側1/4(400px)に来るようにストップさせる
+        const goalX = (pConfig.num_segments || 12) * segmentLen;
+        const maxOffset = goalX - 150; // logicWidth/4(400) と viewPadding(250) の相殺
+        if (offset > maxOffset) return maxOffset;
+        return offset;
+    }
     
     if (finalScrollOffset !== null) return finalScrollOffset;
 
-    // localStartが正常に初期化されてない場合のガード（リコネクト時等用）
-    if (localStartTime === 0) return 0;
+    if (localStartTime === 0) return wallStartOffset;
 
     const elapsedSec = (Date.now() - localStartTime) / 1000;
+    const currentOffset = wallStartOffset + (elapsedSec * (pConfig.scroll_speed || 100));
     
-    // スクロール上限
-    const maxDur = ((12 * segmentLen) + 800) / pConfig.scroll_speed;
-    if (elapsedSec > maxDur) return maxDur * pConfig.scroll_speed;
+    const goalX = (pConfig.num_segments || 12) * segmentLen;
+    // ゴールより先へ進みすぎないための安全上限
+    const absoluteMax = goalX + 1600;
+    if (currentOffset > absoluteMax) return absoluteMax;
     
-    return elapsedSec * pConfig.scroll_speed;
+    return currentOffset;
 }
 
 function buildModelPath() {
@@ -111,39 +142,46 @@ function buildModelPath() {
     for(let t of types) {
         const nextX = cx + segmentLen;
         
-        // 頂点数を100に増やし、曲線のカクつき（ポリゴン感）を極限まで無くす
         for(let i=1; i<=100; i++) {
             const tParam = i / 100.0;
             const px = cx + segmentLen * tParam;
             let py = cy;
             
-            // 全ての形状の始点と終点の傾きが0になる（C1連続）ような式を用い、接続部の「角(とがり)」を完全に無くす
             if (t === 'straight') { py = cy; }
-            else if (t === 'small_curve_up') { py = cy - (1 - Math.cos(tParam * Math.PI * 2)) / 2 * 25; }
-            else if (t === 'small_curve_down') { py = cy + (1 - Math.cos(tParam * Math.PI * 2)) / 2 * 25; }
+            else if (t === 'curve_up' || t === 'small_curve_up') { py = cy - (1 - Math.cos(tParam * Math.PI * 2)) / 2 * 25; }
+            else if (t === 'curve_down' || t === 'small_curve_down') { py = cy + (1 - Math.cos(tParam * Math.PI * 2)) / 2 * 25; }
             else if (t === 'large_curve_up') { py = cy - (1 - Math.cos(tParam * Math.PI * 2)) / 2 * 50; }
             else if (t === 'large_curve_down') { py = cy + (1 - Math.cos(tParam * Math.PI * 2)) / 2 * 50; }
             else if (t === 'loop_up' || t === 'loop_down') {
-                const centerR = 40; 
+                // セグメント全幅にスケールしたループ描画
+                const centerR = 40;
                 const dir = t === 'loop_up' ? 1 : -1;
+                // 前後の直線区間とループ部分を全長segmentLenに収まるよう配分
+                const leadIn = segmentLen * 0.25;  // 前方直線区間
+                const loopSection = segmentLen * 0.5; // ループ区間
+                const leadOut = segmentLen * 0.25; // 後方直線区間
+                const absX = tParam * segmentLen; // セグメント内の絶対進行距離
                 let cX, cY;
-                if (tParam <= 0.25) {
-                    cX = cx + 100 * (tParam / 0.25);
+                if (absX <= leadIn) {
+                    // 前方直線（始点→ループ入口）
+                    cX = cx + absX;
                     cY = cy;
-                } else if (tParam <= 0.75) {
-                    const normT = (tParam - 0.25) / 0.5; // 0 to 1
+                } else if (absX <= leadIn + loopSection) {
+                    // ループ区間
+                    const normT = (absX - leadIn) / loopSection;
                     const theta = -Math.PI/2 + normT * Math.PI * 2;
-                    cX = cx + 100 + centerR * Math.cos(theta);
+                    cX = cx + leadIn + (loopSection/2) + centerR * Math.cos(theta);
                     cY = cy - (centerR + centerR * Math.sin(theta)) * dir;
                 } else {
-                    cX = cx + 100 + 100 * ((tParam - 0.75) / 0.25);
+                    // 後方直線（ループ出口→終点）
+                    cX = cx + absX;
                     cY = cy;
                 }
                 modelPath.push({x: cX, y: cY});
                 continue;
             } else if (t === 'vertical_step_up') {
                 const t2 = (Math.cos(Math.PI + tParam * Math.PI) + 1) / 2;
-                py = cy - t2 * 60; // 段差も緩やかに
+                py = cy - t2 * 60;
             } else if (t === 'vertical_step_down') {
                 const t2 = (Math.cos(Math.PI + tParam * Math.PI) + 1) / 2;
                 py = cy + t2 * 60;
@@ -166,7 +204,7 @@ let lastReportedScore = 0;
 
 function calculateFinalScore() {
     const tol = pConfig.tolerance || 50;
-    const goalX = pConfig.num_segments * segmentLen;
+    const goalX = (pConfig.num_segments || 12) * segmentLen;
     
     let validPoints = 0;
     let evaluatedPoints = 0;
@@ -199,7 +237,7 @@ function calculateFinalScore() {
     }
     
     lastReportedScore = internalScore;
-    wsRef.send(JSON.stringify({ type: 'score', internal_score: internalScore }));
+    if (window.sendGameScore) window.sendGameScore(internalScore);
 }
 
 function updateMovement(dt) {
@@ -221,14 +259,14 @@ function updateMovement(dt) {
     const offsetLX = getLogicalScrollOffset();
     if (myPx < offsetLX) myPx = offsetLX; 
     
-    // プレイ領域を右にずらした分の表示クランプ調整
+    // プレイ領域を右にずらした分の表示クランプ調整（250に原状復帰）
     const viewPaddingLeft = 250;
     if (myPx > offsetLX + logicWidth - viewPaddingLeft) myPx = offsetLX + logicWidth - viewPaddingLeft;
     
-    const goalX = pConfig.num_segments * segmentLen;
+    const goalX = (pConfig.num_segments || 12) * segmentLen;
     if (myPx >= goalX && !myHasGoal) {
         myHasGoal = true;
-        wsRef.send(JSON.stringify({ type: 'goal' }));
+        if (window.sendGameGoal) window.sendGameGoal();
     }
     
     const pt = { x: myPx, y: myPy };
@@ -237,7 +275,7 @@ function updateMovement(dt) {
     if (!last || Math.hypot(last.x - myPx, last.y - myPy) > 5) {
         myTraces.push(pt);
         allTraces[pMe.number].push(pt);
-        wsRef.send(JSON.stringify({ type: 'draw', x: myPx, y: myPy }));
+        if (window.sendGameDraw) window.sendGameDraw(myPx, myPy);
     }
 }
 
@@ -259,7 +297,8 @@ function gameLoop(time) {
         const H = canvas.height;
         ctx.clearRect(0, 0, W, H);
         
-        const isOccupied = pRoom && pRoom.players && pRoom.players.some(p => p.number === i);
+        const playersArr = pRoom && pRoom.players ? (Array.isArray(pRoom.players) ? pRoom.players : Object.values(pRoom.players)) : [];
+        const isOccupied = playersArr.some(p => p.number === i);
         if(!isOccupied) {
             ctx.fillStyle = 'rgba(0,0,0,0.6)';
             ctx.fillRect(0,0,W,H);
@@ -274,34 +313,63 @@ function gameLoop(time) {
         const viewPaddingLeft = 250;
         ctx.translate(viewPaddingLeft - offsetLX, 0);
         
+        // 1. 最背面に押し出しスクロール壁を描画する
+        if (pRoom && (pRoom.state === 'playing' || pRoom.state === 'countdown')) {
+            ctx.beginPath();
+            ctx.strokeStyle = '#000000'; // 黒色の実線
+            ctx.lineWidth = 12;
+            ctx.moveTo(offsetLX, 0);
+            ctx.lineTo(offsetLX, logicHeight);
+            ctx.stroke();
+        }
+
         const isMe = (pMe && i === pMe.number);
 
-        // スタート/ゴールライン
+        // 2. スタート/ゴールラインをその上に描画
         ctx.strokeStyle = 'rgba(239, 68, 68, 0.8)';
         ctx.lineWidth = 10;
         ctx.beginPath();
         ctx.moveTo(0, 0); ctx.lineTo(0, logicHeight);
         ctx.stroke();
         
-        const goalX = 12 * segmentLen;
+        const goalX = (pConfig.num_segments || 12) * segmentLen;
         ctx.beginPath();
         ctx.moveTo(goalX, 0); ctx.lineTo(goalX, logicHeight);
         ctx.stroke();
         
-        drawLine(ctx, modelPath, 'rgba(255, 255, 255, 0.2)', pConfig.line_width || 20);
-        drawLine(ctx, modelPath, 'rgba(255, 255, 255, 0.4)', 4);
+        // お手本線の薄い領域の太さを元の1.5倍に
+        const baseWidth = pConfig.line_width || 40;
+        drawLine(ctx, modelPath, 'rgba(255, 255, 255, 0.2)', baseWidth * 1.5);
+        drawLine(ctx, modelPath, 'rgba(255, 255, 255, 0.4)', 8);
         
+        // トレース線の太さは以前の2倍 (6 -> 12)
         const pColor = getPlayerColor(i);
-        drawLine(ctx, allTraces[i], pColor, 6);
+        drawLine(ctx, allTraces[i], pColor, 12);
         
         const targetPt = isMe ? {x: myPx, y: myPy} : othersPointers[i];
         if (targetPt) {
+            // プレイヤーの円のサイズを直近の2/3に (半径16 -> 11, 枠線6 -> 4)
+            const pX = targetPt.x;
+            const pY = targetPt.y;
+
+            ctx.fillStyle = '#ffffff'; // Fill color is white
             ctx.beginPath();
-            ctx.arc(targetPt.x, targetPt.y, 8, 0, Math.PI*2);
-            ctx.fillStyle = '#ffffff';
+            // 縦横のスケール比率相違により丸が楕円にならないよう逆スケーリングを行う
+            if (ctx.ellipse) {
+                ctx.ellipse(pX, pY, 15 * (scaleY / scaleX), 15, 0, 0, Math.PI * 2);
+            } else {
+                ctx.arc(pX, pY, 15, 0, Math.PI * 2);
+            }
             ctx.fill();
-            ctx.lineWidth = 3;
-            ctx.strokeStyle = pColor;
+
+            ctx.lineWidth = 3; // Stroke width is 3
+            ctx.strokeStyle = pColor; // Stroke color is player color
+            ctx.beginPath();
+            if (ctx.ellipse) {
+                ctx.ellipse(pX, pY, 15 * (scaleY / scaleX), 15, 0, 0, Math.PI * 2);
+            } else {
+                ctx.arc(pX, pY, 15, 0, Math.PI * 2);
+            }
             ctx.stroke();
         }
         
@@ -330,8 +398,8 @@ function getPlayerColor(num) {
     switch(num) {
         case 1: return '#ef4444'; 
         case 2: return '#3b82f6'; 
-        case 3: return '#10b981'; 
-        case 4: return '#f59e0b'; 
+        case 3: return '#f59e0b'; 
+        case 4: return '#10b981'; 
         default: return '#ffffff';
     }
 }

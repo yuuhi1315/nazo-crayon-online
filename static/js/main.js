@@ -1,18 +1,16 @@
-const urlParams = new URLSearchParams(window.location.search);
-let roomId = urlParams.get('room');
+// ====== Firebase Setup & Replaces WebSocket ======
+const roomId = 'main_room';
 
-if (!roomId) {
-    roomId = Math.random().toString(36).substring(2, 8);
-    window.location.search = `?room=${roomId}`;
+if (!window.db) {
+    console.error("Firebase DB is not initialized! Check firebase_config.js");
 }
-
-const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-const wsUrl = `${wsProtocol}//${window.location.host}/ws/${roomId}`;
-const ws = new WebSocket(wsUrl);
+const roomRef = window.db ? window.db.ref('rooms/' + roomId) : null;
 
 let myPlayerInfo = null;
 let roomState = null;
-let gameConfig = null;
+let isHost = false;
+let hostInterval = null;
+let firstJoin = true; // 初回接続フラグ
 
 const lobbyDiv = document.getElementById('lobby');
 const roomInfoP = document.getElementById('room-info');
@@ -24,162 +22,420 @@ const overlayMsg = document.getElementById('overlay-message');
 const overlayText = document.getElementById('overlay-text');
 const overlayResult = document.getElementById('overlay-result');
 
+roomInfoP.style.display = 'none';
+
 if (startBtn) {
     startBtn.addEventListener('click', () => {
-        ws.send(JSON.stringify({ type: 'start_game' }));
+        if (isHost && roomRef) {
+            roomRef.update({
+                state: 'countdown',
+                state_started_at: firebase.database.ServerValue.TIMESTAMP,
+                model_line: generateModelLine(),
+                traces: {},
+                global_start_time: 0,
+                review_start_time: 0
+            });
+        }
     });
 }
 
-roomInfoP.textContent = `Room ID: ${roomId} (このURLを共有して対戦)`;
+function generateModelLine() {
+    const num_segs = window.gameConfig?.num_segments || 12;
+    const types = ['straight', 'curve_up', 'curve_down', 'loop_up', 'loop_down', 'vertical_step_up', 'vertical_step_down'];
+    const line = [];
+    let currentY = 0; // センター(0)からの相対位置。負が上方向。
 
-ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    
-    if (data.type === 'error') {
-        alert(data.message);
-        return;
+    for (let i = 0; i < num_segs; i++) {
+        let validTypes = [...types];
+        
+        // はみ出し防止ガード: Y軸方向に大きくズレすぎた場合、同方向への移動を禁止
+        if (currentY <= -120) {
+            validTypes = validTypes.filter(t => t !== 'vertical_step_up' && t !== 'loop_up');
+        }
+        if (currentY >= 120) {
+            validTypes = validTypes.filter(t => t !== 'vertical_step_down' && t !== 'loop_down');
+        }
+        
+        const type = validTypes[Math.floor(Math.random() * validTypes.length)];
+        line.push(type);
+        
+        // 段差だけが直後のYベースラインを変更する
+        if (type === 'vertical_step_up') currentY -= 60;
+        if (type === 'vertical_step_down') currentY += 60;
     }
-    
-    if (data.type === 'welcome') {
-        myPlayerInfo = data.you;
-        readyBtn.disabled = false;
-        readyBtn.textContent = '準備OK';
-    }
-    
-    if (data.type === 'roomState') {
+    return line;
+}
+
+let myPlayerId = localStorage.getItem('nazo_uuid');
+if (!myPlayerId) {
+    myPlayerId = 'p_' + Math.random().toString(36).substr(2, 9);
+    localStorage.setItem('nazo_uuid', myPlayerId);
+}
+
+if (roomRef) {
+    const myPlayerRef = roomRef.child('players/' + myPlayerId);
+    myPlayerRef.onDisconnect().remove();
+
+    // まず接続前にルームの状態をリセット（前回の残りデータ対策）
+    roomRef.once('value', (snap) => {
+        const data = snap.val();
+        const playerCount = data && data.players ? Object.keys(data.players).length : 0;
+        // 前回の残りデータがある場合、または誰もいない場合はリセット
+        const needsReset = !data || !data.state || data.state === 'result' || data.state === 'scoring' || playerCount === 0;
+        
+        const afterReset = () => {
+            // プレイヤーをトランザクションで追加
+            roomRef.child('players').transaction((playersObj) => {
+                if (!playersObj) playersObj = {};
+                
+                let myNum = null;
+                if (playersObj[myPlayerId]) {
+                    myNum = playersObj[myPlayerId].number;
+                } else {
+                    if (Object.keys(playersObj).length >= 4) return;
+                    let takenNums = Object.values(playersObj).map(p => p.number);
+                    myNum = 1;
+                    while(takenNums.includes(myNum)) myNum++;
+                }
+                
+                playersObj[myPlayerId] = {
+                    number: myNum,
+                    name: 'Player ' + myNum,
+                    ready: false,
+                    goal: false,
+                    score: null,
+                    rank: null,
+                    last_ping: firebase.database.ServerValue.TIMESTAMP
+                };
+                return playersObj;
+                
+            }, (error, committed, snapshot) => {
+                if (error || !committed) {
+                    if (!error) alert('ルームが満員です。');
+                    return;
+                }
+                const allPlayers = snapshot.val();
+                if (allPlayers && allPlayers[myPlayerId]) {
+                    myPlayerInfo = allPlayers[myPlayerId];
+                    myPlayerInfo.id = myPlayerId;
+                }
+                setupRoomListener();
+            });
+        };
+
+        if (needsReset) {
+            roomRef.update({
+                state: 'lobby',
+                global_start_time: 0,
+                review_start_time: 0,
+                model_line: null,
+                traces: null,
+                state_started_at: firebase.database.ServerValue.TIMESTAMP
+            }).then(afterReset);
+        } else {
+            afterReset();
+        }
+    });
+}
+
+function setupRoomListener() {
+    roomRef.on('value', (snap) => {
+        const data = snap.val();
+        if (!data || !data.state) {
+            roomRef.update({
+                state: 'lobby',
+                global_start_time: 0,
+                review_start_time: 0,
+                state_started_at: firebase.database.ServerValue.TIMESTAMP
+            });
+            return;
+        }
+        
         const oldState = roomState ? roomState.state : null;
         roomState = data;
-        gameConfig = data.config;
         
-        // game.jsの状態参照も更新
-        if (typeof updateRoomState === 'function') updateRoomState(data);
-        
-        handleStateTransition(oldState, roomState.state);
-        if (roomState.state === 'lobby') {
-            updateLobby();
+        // ルームに誰もいなくなったら自動リセット
+        const currentPlayers = data.players ? Object.keys(data.players) : [];
+        if (currentPlayers.length === 0 && data.state !== 'lobby') {
+            roomRef.update({
+                state: 'lobby',
+                global_start_time: 0,
+                review_start_time: 0,
+                model_line: null,
+                traces: null,
+                state_started_at: firebase.database.ServerValue.TIMESTAMP
+            });
+            return;
         }
         
-        const allReady = roomState.players.length > 0 && roomState.players.every(p => p.ready);
-        const is1P = myPlayerInfo && myPlayerInfo.number === 1;
-        if (startBtn) {
-            if (allReady && is1P && roomState.state === 'lobby') {
-                startBtn.style.display = 'inline-block';
-            } else {
-                startBtn.style.display = 'none';
+        // pConfigとしてgameConfigをマージ（game.jsが参照するため）
+        roomState.config = Object.assign({}, window.gameConfig || {});
+        
+        // Convert traces format gracefully
+        if (roomState.traces) {
+            for (let num of Object.keys(roomState.traces)) {
+                if (!Array.isArray(roomState.traces[num])) {
+                    roomState.traces[num] = Object.values(roomState.traces[num]);
+                }
             }
         }
-    }
-    
-    if (data.type === 'draw') {
-        if (typeof onReceiveDraw === 'function') onReceiveDraw(data);
-    }
-};
-
-readyBtn.addEventListener('click', () => {
-    ws.send(JSON.stringify({ type: 'ready' }));
-    readyBtn.disabled = true;
-    readyBtn.textContent = '待機中...';
-});
-
-function updateLobby() {
-    if(!playersListDiv) return;
-    playersListDiv.innerHTML = '';
-    
-    roomState.players.forEach(p => {
-        const div = document.createElement('div');
-        const isMe = myPlayerInfo && p.id === myPlayerInfo.id;
-        div.textContent = `${p.number}P: ${isMe ? 'あなた 🟢' : '参加者'} ${p.ready ? '✅' : '⏳'}`;
-        div.style.color = `var(--color-${p.number}p)`;
-        playersListDiv.appendChild(div);
+        
+        determineHost();
+        
+        const newState = roomState.state;
+        
+        // 初回接続時、または状態が変わったときにUIを反映する
+        if (firstJoin || oldState !== newState) {
+            firstJoin = false;
+            handleStateTransition(oldState, newState);
+        }
+        updatePlayersList(roomState.players || {}, newState);
     });
+}
+
+function determineHost() {
+    if (!roomState || !roomState.players) {
+        isHost = false; return;
+    }
+    const pIds = Object.keys(roomState.players);
+    if (pIds.length === 0) return;
+    pIds.sort();
+    const newIsHost = (myPlayerId === pIds[0]);
+    
+    if (newIsHost && !isHost) {
+        if (hostInterval) clearInterval(hostInterval);
+        hostInterval = setInterval(hostLoop, 500);
+    } else if (!newIsHost && isHost) {
+        if (hostInterval) clearInterval(hostInterval);
+        hostInterval = null;
+    }
+    isHost = newIsHost;
+}
+
+function hostLoop() {
+    if (!isHost || !roomState) return;
+    
+    const players = roomState.players ? Object.values(roomState.players) : [];
+    const numPlayers = players.length;
+    const now = Date.now();
+    const stateStart = roomState.state_started_at || now;
+    
+    if (roomState.state === 'countdown') {
+        // state_started_atはServerValue.TIMESTAMPなのでサーバー側の時刻。
+        // 但しクライアントとずれる可能性があるため、3500msの余裕を持たせる
+        if (now - stateStart >= 3500) {
+            roomRef.update({
+                state: 'playing',
+                state_started_at: firebase.database.ServerValue.TIMESTAMP,
+                global_start_time: firebase.database.ServerValue.TIMESTAMP
+            });
+        }
+    }
+    else if (roomState.state === 'playing') {
+        const allGoal = (numPlayers > 0) && players.every(p => p.goal === true);
+        // global_start_timeがServerValue.TIMESTAMPの場合、msで保持される
+        let isTimeout = false;
+        if (roomState.global_start_time > 0) {
+            const startMs = roomState.global_start_time > 1e12 ? roomState.global_start_time : roomState.global_start_time * 1000;
+            if (now - startMs > 30000) isTimeout = true; // 30秒タイムアウトに延長
+        }
+        if (allGoal || isTimeout) {
+            roomRef.update({ 
+                state: 'finish_display', 
+                state_started_at: firebase.database.ServerValue.TIMESTAMP 
+            });
+        }
+    }
+    else if (roomState.state === 'finish_display') {
+        if (now - stateStart >= 2000) {
+            roomRef.update({
+                state: 'review',
+                state_started_at: firebase.database.ServerValue.TIMESTAMP,
+                review_start_time: now / 1000
+            });
+        }
+    }
+    else if (roomState.state === 'review') {
+        const segLen = window.gameConfig?.segment_length || 200;
+        const totalSegs = window.gameConfig?.num_segments || 12;
+        const target_offset = (totalSegs * segLen) - 150;
+        const start_offset = -250;
+        const rv_speed = window.gameConfig?.review_scroll_speed || 600;
+        const review_duration = ((target_offset - start_offset) / rv_speed) + 0.5;
+        
+        if (now - stateStart >= review_duration * 1000) {
+            roomRef.update({ state: 'scoring', state_started_at: firebase.database.ServerValue.TIMESTAMP });
+        }
+    }
+    else if (roomState.state === 'scoring') {
+        if (now - stateStart >= 3000) {
+            let pList = players.map(p => ({
+                id: Object.keys(roomState.players).find(k => roomState.players[k].number === p.number), 
+                score: p.score || 0
+            }));
+            pList.sort((a, b) => b.score - a.score);
+            let rank = 1;
+            let updates = { state: 'result', state_started_at: firebase.database.ServerValue.TIMESTAMP };
+            pList.forEach((p, idx) => {
+                if (idx > 0 && p.score < pList[idx-1].score) rank = idx + 1;
+                updates[`players/${p.id}/rank`] = rank;
+            });
+            roomRef.update(updates);
+        }
+    }
 }
 
 function handleStateTransition(oldState, newState) {
+    if (typeof updateRoomState === 'function') updateRoomState(roomState);
+    
     if (newState === 'lobby') {
         lobbyDiv.style.display = 'block';
         gameContainer.style.display = 'none';
         overlayMsg.style.display = 'none';
+        overlayText.textContent = '';
         overlayResult.style.display = 'none';
+        if (typeof stopGameplay === 'function') stopGameplay();
         readyBtn.disabled = false;
         readyBtn.textContent = '準備OK';
+        
+        if (myPlayerInfo) {
+            roomRef.child('players/' + myPlayerInfo.id).update({
+                ready: false, goal: false, score: null, rank: null
+            });
+        }
     }
     else if (newState === 'countdown') {
-        lobbyDiv.style.display = 'none';
-        gameContainer.style.display = 'flex';
-        overlayMsg.style.display = 'flex';
-        overlayText.textContent = '3';
-        
-        if (typeof initGame === 'function') {
-            initGame(ws, roomState, gameConfig, myPlayerInfo);
+        // ゲーム初期化はcountdown開始の1回だけ行う
+        if (typeof initGame === 'function' && roomState) {
+            const fullConfig = Object.assign({}, window.gameConfig || {}, roomState.config || {});
+            initGame(null, Object.assign({}, roomState), fullConfig, myPlayerInfo);
         }
         
-        // 3-2-1演出
-        let count = 2; // 3 is already shown
-        const iv = setInterval(() => {
-            if(count > 0) overlayText.textContent = count;
-            else clearInterval(iv);
+        lobbyDiv.style.display = 'none';
+        gameContainer.style.display = 'flex';
+        overlayResult.style.display = 'none';
+        overlayMsg.style.display = 'flex';
+        let count = 3;
+        overlayText.textContent = count;
+        
+        const cInt = setInterval(() => {
             count--;
+            if (count > 0) overlayText.textContent = count;
+            else if (count === 0) overlayText.textContent = 'START!';
+            else { clearInterval(cInt); overlayMsg.style.display = 'none'; }
         }, 1000);
+        
+        // カウントダウン中はまだ動かさない（startGameplayはplayingで呼ぶ）
     }
     else if (newState === 'playing') {
-        overlayMsg.style.display = 'flex';
-        overlayText.textContent = 'START!';
-        
+        lobbyDiv.style.display = 'none';
+        gameContainer.style.display = 'flex';
+        overlayMsg.style.display = 'none';
+        // START後に初めて操作可能にする
         if (typeof startGameplay === 'function') startGameplay();
-        
-        setTimeout(() => {
-            overlayMsg.style.display = 'none';
-        }, 1000);
     }
     else if (newState === 'finish_display') {
+        lobbyDiv.style.display = 'none';
+        gameContainer.style.display = 'flex';
         if (typeof stopGameplay === 'function') stopGameplay();
         overlayMsg.style.display = 'flex';
         overlayText.textContent = 'FINISH!';
     }
+    else if (newState === 'review') {
+        lobbyDiv.style.display = 'none';
+        gameContainer.style.display = 'flex';
+        overlayMsg.style.display = 'none';
+        // リプレイ用のスクロールを開始する
+        if (typeof reviewGame === 'function') reviewGame();
+    }
     else if (newState === 'scoring') {
+        lobbyDiv.style.display = 'none';
+        gameContainer.style.display = 'flex';
+        overlayMsg.style.display = 'flex';
         overlayText.textContent = '採点中...';
-        if (typeof calculateFinalScore === 'function') calculateFinalScore();
+        
+        if (typeof calculateFinalScore === 'function') {
+            calculateFinalScore();
+        }
     }
     else if (newState === 'result') {
+        lobbyDiv.style.display = 'none';
+        gameContainer.style.display = 'flex';
         overlayMsg.style.display = 'none';
-        showResult();
+        if (typeof showResult === 'function') showResult(roomState.players);
     }
 }
 
-function restartRoom() {
-    ws.send(JSON.stringify({ type: 'restart' }));
+function updatePlayersList(playersObj, state) {
+    playersListDiv.innerHTML = '';
+    const players = Object.values(playersObj);
+    players.sort((a,b) => a.number - b.number);
+    let allReady = true;
+    for (const p of players) {
+        const pDiv = document.createElement('div');
+        pDiv.className = `player-item ${p.ready ? 'ready' : ''}`;
+        pDiv.innerHTML = `<span class="player-color p${p.number}-indicator">●</span> ${p.name} ${p.ready ? '(OK)' : ''}`;
+        playersListDiv.appendChild(pDiv);
+        if (!p.ready) allReady = false;
+    }
+    if (isHost && state === 'lobby') startBtn.style.display = (players.length > 0 && allReady) ? 'inline-block' : 'none';
+    else startBtn.style.display = 'none';
 }
 
-function showResult() {
-    const ranks = [];
-    roomState.players.forEach(p => {
-        ranks.push({name: `${p.number}P`, display: p.display_score, internal: p.internal_score || 0});
-    });
-    
-    // 勝敗の決定は表示スコアで行う（同率順位あり）
-    ranks.sort((a,b) => b.display - a.display);
-    
-    const rankListEl = document.getElementById('rank-list');
-    if(rankListEl) {
-        rankListEl.innerHTML = '';
-        let currentRank = 1;
-        let previousScore = -1;
-        
-        ranks.forEach((r, idx) => {
-            if (r.display !== previousScore) {
-                currentRank = idx + 1;
-                previousScore = r.display;
-            }
-            
-            const div = document.createElement('div');
-            div.className = 'rank-item';
-            div.innerHTML = `<span>${currentRank}位 ${r.name}</span> <span>${r.display}点 <span style="font-size:0.6em;color:#94a3b8;font-weight:normal;">(内部スコア:${r.internal})</span></span>`;
-            if (currentRank === 1) {
-                div.style.color = '#fbbf24'; // Winner gold
-            }
-            rankListEl.appendChild(div);
+readyBtn.addEventListener('click', () => {
+    if (!myPlayerInfo) return;
+    roomRef.child('players/' + myPlayerInfo.id).update({ ready: true });
+    readyBtn.disabled = true;
+    readyBtn.textContent = '準備完了';
+});
+
+document.getElementById('restart-btn').addEventListener('click', () => {
+    if (isHost && roomRef) {
+        roomRef.update({ 
+            state: 'lobby',
+            model_line: null,
+            traces: null,
+            global_start_time: 0,
+            review_start_time: 0,
+            state_started_at: firebase.database.ServerValue.TIMESTAMP
         });
     }
-    
+});
+
+// ====== Interception points for game.js ======
+window.sendGameDraw = function(x, y) {
+    if(!myPlayerInfo || !roomRef) return;
+    roomRef.child('traces/' + myPlayerInfo.number).push({x, y});
+};
+
+window.sendGameGoal = function() {
+    if(!myPlayerInfo || !roomRef) return;
+    roomRef.child('players/' + myPlayerInfo.id).update({ goal: true });
+};
+
+window.sendGameScore = function(score) {
+    if(!myPlayerInfo || !roomRef) return;
+    roomRef.child('players/' + myPlayerInfo.id).update({ score: score });
+};
+
+function showResult(playersObj) {
+    if (!overlayResult) return;
     overlayResult.style.display = 'flex';
+    const rankList = document.getElementById('rank-list');
+    if (!rankList) return;
+    rankList.innerHTML = '';
+    
+    const pList = Object.values(playersObj).sort((a, b) => {
+        const rA = a.rank || 99;
+        const rB = b.rank || 99;
+        return rA - rB;
+    });
+    
+    pList.forEach(p => {
+        const div = document.createElement('div');
+        div.style.marginBottom = '10px';
+        div.style.fontSize = '1.2rem';
+        div.innerHTML = `<strong style="color:var(--primary)">${p.rank || '-'}位</strong>: <span style="margin: 0 10px;">${p.name}</span> <span>${p.score || 0}点</span>`;
+        rankList.appendChild(div);
+    });
 }

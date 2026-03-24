@@ -15,3 +15,9 @@ venv.bak/
 
 # macOS
 .DS_Store
+
+# Firebase CLI binary
+firebase.exe
+
+# Firebase cache
+.firebase/
