@@ -341,10 +341,11 @@ function gameLoop(time) {
         ctx.moveTo(goalX, 0); ctx.lineTo(goalX, logicHeight);
         ctx.stroke();
         
-        // お手本線の薄い領域の太さを元の1.5倍に
+        // お手本線の描画色を白から灰色系に変更（白背景での視認性確保）
         const baseWidth = pConfig.line_width || 40;
-        drawLine(ctx, modelPath, 'rgba(255, 255, 255, 0.2)', baseWidth * 1.5);
-        drawLine(ctx, modelPath, 'rgba(255, 255, 255, 0.4)', 8);
+        const modelColor = '100, 116, 139'; // Slate 500
+        drawLine(ctx, modelPath, `rgba(${modelColor}, 0.15)`, baseWidth * 1.5);
+        drawLine(ctx, modelPath, `rgba(${modelColor}, 0.4)`, 8);
         
         // トレース線の太さは以前の2倍 (6 -> 12)
         const pColor = getPlayerColor(i);
