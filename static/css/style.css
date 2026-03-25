@@ -5,10 +5,10 @@
     --accent-bg: #FFF2A6;
     --text-primary: #1e293b; /* Slate 800 */
     --text-secondary: #64748b;
-    --accent: #3b82f6; /* Blue 500 (Keep button color) */
+    --accent: #3b82f6; 
     --accent-hover: #2563eb;
-    --lane-bg: #FFFFFF;
-    --lane-border: #f1f5f9;
+    --lane-bg: #FFF2A6;
+    --lane-border: rgba(0, 0, 0, 0.05);
     
     --color-1p: #ef4444; 
     --color-2p: #3b82f6; 
@@ -138,10 +138,10 @@ h1 {
 .player-score { font-size: 2.2rem; font-weight: 800; font-family: 'Inter', sans-serif; color: var(--text-primary); }
 .score-label { font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
 
-.p1-indicator { color: var(--color-1p); }
-.p2-indicator { color: var(--color-2p); }
-.p3-indicator { color: var(--color-3p); }
-.p4-indicator { color: var(--color-4p); }
+.p1-indicator, .p1-text { color: var(--color-1p); }
+.p2-indicator, .p2-text { color: var(--color-2p); }
+.p3-indicator, .p3-text { color: var(--color-3p); }
+.p4-indicator, .p4-text { color: var(--color-4p); }
 
 canvas {
     position: absolute;
@@ -160,8 +160,8 @@ canvas {
 #overlay-text {
     font-size: 8rem;
     font-weight: 800;
-    color: #fca5a5; /* 以前の赤色系に戻す */
-    text-shadow: 0 0 20px rgba(239, 68, 68, 0.8), 0 0 40px rgba(239, 68, 68, 0.5);
+    color: #e11d48; /* ローズレッド (Rose 600) */
+    text-shadow: 0 4px 12px rgba(0,0,0,0.1);
     animation: pop 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 @keyframes pop {
@@ -194,7 +194,13 @@ canvas {
     min-width: 420px;
 }
 
-.result-card h2 { font-size: 3.2rem; margin-bottom: 2rem; color: var(--text-primary); font-weight: 800; }
+.result-card h2 { 
+    font-size: 3.2rem; 
+    margin-bottom: 2rem; 
+    color: #e11d48; 
+    font-weight: 800; 
+    text-shadow: 0 4px 12px rgba(225, 29, 72, 0.15);
+}
 .rank-list { font-size: 1.6rem; text-align: left; }
 .rank-item { 
     margin: 1.2rem 0; 
@@ -206,9 +212,9 @@ canvas {
 }
 #restart-btn {
     margin-top: 2rem;
-    background: var(--text-primary); color: #FFFFFF; border: none; padding: 1rem 3rem;
+    background: var(--accent); color: #FFFFFF; border: none; padding: 1rem 3rem;
     font-size: 1.2rem; font-weight: 800; border-radius: 0.75rem; cursor: pointer;
-    box-shadow: 0 8px 20px rgba(30, 41, 59, 0.2);
+    box-shadow: 0 8px 20px rgba(59, 130, 246, 0.3);
     transition: all 0.2s;
 }
-#restart-btn:hover { background: #334155; transform: translateY(-3px); box-shadow: 0 12px 28px rgba(30, 41, 59, 0.3); }
+#restart-btn:hover { background: var(--accent-hover); transform: translateY(-3px); box-shadow: 0 12px 28px rgba(59, 130, 246, 0.4); }

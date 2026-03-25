@@ -497,9 +497,10 @@ function showResult(playersObj) {
     
     pList.forEach(p => {
         const div = document.createElement('div');
-        div.style.marginBottom = '10px';
-        div.style.fontSize = '1.2rem';
-        div.innerHTML = `<strong style="color:var(--primary)">${p.rank || '-'}位</strong>: <span style="margin: 0 10px;">${p.name}</span> <span>${p.score || 0}点</span>`;
+        div.className = 'rank-item';
+        const pName = p.name || (p.number + 'P');
+        // プレイヤー番号に応じたカラークラスを適用
+        div.innerHTML = `<span>${p.rank || '-'}位: <span class="p${p.number}-text">${pName}</span></span><span>${p.score || 0}点</span>`;
         rankList.appendChild(div);
     });
 }
