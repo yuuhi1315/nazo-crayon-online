@@ -73,7 +73,7 @@ function generateModelLine() {
 }
 
 let myPlayerId = localStorage.getItem('nazo_uuid');
-if (!myPlayerId) {
+if (!myPlayerId || myPlayerId === 'undefined') {
     myPlayerId = 'p_' + Math.random().toString(36).substr(2, 9);
     localStorage.setItem('nazo_uuid', myPlayerId);
 }
@@ -203,8 +203,11 @@ function determineHost() {
     if (!roomState || !roomState.players) {
         isHost = false; return;
     }
-    const pIds = Object.keys(roomState.players);
-    if (pIds.length === 0) return;
+    // 有効なプレイヤーIDのみを抽出（undefinedなどを除外）
+    const pIds = Object.keys(roomState.players).filter(id => id && id !== 'undefined' && roomState.players[id] && roomState.players[id].name);
+    if (pIds.length === 0) {
+        isHost = false; return;
+    }
     pIds.sort();
     const newIsHost = (myPlayerId === pIds[0]);
     
@@ -221,7 +224,13 @@ function determineHost() {
 function hostLoop() {
     if (!isHost || !roomState) return;
     
-    const players = roomState.players ? Object.values(roomState.players) : [];
+    // 不正な "undefined" プレイヤーデータが混入している場合の物理削除
+    if (roomState.players && roomState.players['undefined']) {
+        console.warn("Cleaning up 'undefined' player from DB...");
+        roomRef.child('players/undefined').remove();
+    }
+    
+    const players = roomState.players ? Object.values(roomState.players).filter(p => p && p.number) : [];
     const numPlayers = players.length;
     const now = Date.now();
     const stateStart = roomState.state_started_at || now;
@@ -376,7 +385,8 @@ function handleStateTransition(oldState, newState) {
 
 function updatePlayersList(playersObj, state) {
     playersListDiv.innerHTML = '';
-    const players = Object.values(playersObj);
+    // 有効なプレイヤーデータのみを抽出
+    const players = Object.values(playersObj).filter(p => p && p.name && p.number);
     players.sort((a,b) => a.number - b.number);
     let allReady = true;
     for (const p of players) {
