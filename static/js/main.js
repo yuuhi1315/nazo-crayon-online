@@ -228,8 +228,8 @@ function hostLoop() {
     
     if (roomState.state === 'countdown') {
         // state_started_atはServerValue.TIMESTAMPなのでサーバー側の時刻。
-        // 但しクライアントとずれる可能性があるため、3500msの余裕を持たせる
-        if (now - stateStart >= 3500) {
+        // クライアントのアニメーション（3秒後にSTART!表示）にきっちり合わせるため3000msへ短縮
+        if (now - stateStart >= 3000) {
             roomRef.update({
                 state: 'playing',
                 state_started_at: firebase.database.ServerValue.TIMESTAMP,
@@ -267,7 +267,8 @@ function hostLoop() {
         const target_offset = (totalSegs * segLen) - 150;
         const start_offset = -250;
         const rv_speed = window.gameConfig?.review_scroll_speed || 600;
-        const review_duration = ((target_offset - start_offset) / rv_speed) + 0.5;
+        // 完了後の待機0.5秒を削除して直ぐに採点画面へ移行する
+        const review_duration = ((target_offset - start_offset) / rv_speed);
         
         if (now - stateStart >= review_duration * 1000) {
             roomRef.update({ state: 'scoring', state_started_at: firebase.database.ServerValue.TIMESTAMP });
@@ -336,7 +337,8 @@ function handleStateTransition(oldState, newState) {
     else if (newState === 'playing') {
         lobbyDiv.style.display = 'none';
         gameContainer.style.display = 'flex';
-        overlayMsg.style.display = 'none';
+        // START!の文字を見せるため0.6秒だけ残してから消す
+        setTimeout(() => { overlayMsg.style.display = 'none'; }, 600);
         // START後に初めて操作可能にする
         if (typeof startGameplay === 'function') startGameplay();
     }
