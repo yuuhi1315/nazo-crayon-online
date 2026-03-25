@@ -46,6 +46,12 @@ function generateModelLine() {
     let currentY = 0; // センター(0)からの相対位置。負が上方向。
 
     for (let i = 0; i < num_segs; i++) {
+        // 最初と最後は必ず直線にする
+        if (i === 0 || i === num_segs - 1) {
+            line.push('straight');
+            continue;
+        }
+
         let validTypes = [...types];
         
         // はみ出し防止ガード: Y軸方向に大きくズレすぎた場合、同方向への移動を禁止
@@ -100,7 +106,7 @@ if (roomRef) {
                 
                 playersObj[myPlayerId] = {
                     number: myNum,
-                    name: 'Player ' + myNum,
+                    name: myNum + 'P',
                     ready: false,
                     goal: false,
                     score: null,
