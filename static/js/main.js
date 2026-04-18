@@ -78,7 +78,9 @@ if (!myPlayerId || myPlayerId === 'undefined') {
     localStorage.setItem('nazo_uuid', myPlayerId);
 }
 
-if (roomRef) {
+function setupFirebaseInteraction() {
+    if (!roomRef) return;
+    
     const myPlayerRef = roomRef.child('players/' + myPlayerId);
     myPlayerRef.onDisconnect().remove();
 
@@ -142,6 +144,22 @@ if (roomRef) {
             afterReset();
         }
     });
+}
+
+// 認証を行ってからデータベースアクセスを開始する
+if (window.firebase && firebase.auth) {
+    firebase.auth().onAuthStateChanged((user) => {
+        if (user) {
+            setupFirebaseInteraction();
+        }
+    });
+    firebase.auth().signInAnonymously().catch((error) => {
+        console.error("Firebase Anonymous Auth failed:", error);
+        alert("データベース接続のための認証に失敗しました。管理者がFirebaseコンソールで匿名認証を有効にする必要があります。");
+    });
+} else {
+    // Authライブラリが読み込まれていない等のフォールバック（基本的にここへは来ない想定）
+    setupFirebaseInteraction();
 }
 
 function setupRoomListener() {
